@@ -183,7 +183,8 @@ export class SkillRuntime {
     if (this.spCost <= 0) this.charges = this.maxCharges;
     // unite helpers whose timed skill was running when their combat ended: it keeps running (a fresh duration/ammo),
     // without spending a charge — the carried SP is what they had accumulated (0 while a skill runs).
-    if (carry && carry.skillActive && this.isTimed) this.activate('carry', { free: true });
+    if (this.spec.activateOnDeploy) this.activate('deploy');
+    else if (carry && carry.skillActive && this.isTimed) this.activate('carry', { free: true });
   }
 
   _startPassive() {
