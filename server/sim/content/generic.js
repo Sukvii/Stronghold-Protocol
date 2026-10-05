@@ -147,10 +147,11 @@ export function genericSkillSpec(sk, bb = sk?.bb ?? {}, def = null) {
   set('resIgnoreFlat', g('magic_resist_penetrate_fixed'));
   set('defIgnoreFlat', g('def_penetrate_fixed'));
 
-  const passiveTimed = kind === 'passive' && Object.keys(mods).length && num(bb.duration) > 0 && /\d+(\.\d+)?秒内/.test(desc) ? num(bb.duration) : 0;
-  if (passiveTimed) kind = 'duration';
+  // Effect inference keeps the original kind; a deployment window only changes the lifecycle.
   const passive = kind === 'passive';
   const timed = kind === 'duration' || kind === 'ammo' || kind === 'toggle';
+  const passiveTimed = passive && Object.keys(mods).length && num(bb.duration) > 0 && /\d+(\.\d+)?秒内/.test(desc) ? num(bb.duration) : 0;
+  if (passiveTimed) kind = 'duration';
 
   // ---- targeting / attack override (never for passives: their scales describe procs)
   const targeting = {};

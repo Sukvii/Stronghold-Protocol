@@ -89,12 +89,12 @@ function sniperWith(skill, o = {}) {
   return chessRec({ id: 't_sn', profession: 'SNIPER', subProfessionId: 'closerange', stats: { atk: 100, bat: 1, ...(o.stats || {}) }, rangeGrid: RANGE3, skill, ...o });
 }
 
-test('generic timed passive: deployment window owns stats, targeting, arts hits and statuses; permanent passive stays on', () => {
+test('generic timed passive: deployment window owns stats and arts hits without reinterpreting passive proc parameters; permanent passive stays on', () => {
   const h = makeBattle({
     defs: { chess: {
       t_sn: sniperWith({ skillType: 'PASSIVE', duration: 0, spCost: 0,
-        description: '部署后在4秒内攻击力+100%，攻击造成法术伤害并使目标寒冷1秒',
-        bb: { atk: 1, duration: 4, 'attack@cold': 1, ability_range_forward_extend: 1 } }),
+        description: '部署后在4秒内攻击力+100%，攻击造成法术伤害',
+        bb: { atk: 1, duration: 4, max_target: 2, 'attack@cold': 1, ability_range_forward_extend: 1 } }),
       t_p: sniperWith({ skillType: 'PASSIVE', duration: 0, spCost: 0, description: '攻击力+100%', bb: { atk: 1, duration: 4 } }, { id: 't_p' }),
     }, enemies: { enemy_dummy: dummy() } },
     units: [{ chessId: 't_sn', row: 10, col: 4 }, { chessId: 't_p', row: 12, col: 4 }],
@@ -105,25 +105,25 @@ test('generic timed passive: deployment window owns stats, targeting, arts hits 
   assert.equal(u.skill.kind, 'duration');
   assert.equal(u.skill.activations, 1);
   assert.equal(u.skill.ready, false);
-  const extended = u.rangeKeys.length;
-  const e = h.spawn('enemy_dummy', { pos: [10, 6] });
+  assert.deepEqual(u.rangeKeys, u.baseRangeKeys, 'passive parameters do not extend the attack range');
+  h.spawn('enemy_dummy', { pos: [10, 6] });
+  h.spawn('enemy_dummy', { pos: [10, 6] });
   h.run(2);
   approx(u.s.atk, 200);
-  assert.ok(e.s.flags.cold);
-  assert.ok(h.hooksOf('damaged').filter((c) => c.source === u).every((c) => c.type === 'arts'));
+  const hits = h.hooksOf('damaged').filter((c) => c.source === u);
+  assert.ok(hits.length && hits.every((c) => c.type === 'arts'));
+  assert.equal(new Set(hits.map((c) => c.target)).size, 1, 'passive max_target does not turn normal attacks into multi-target attacks');
   assert.deepEqual(h.snapshot().units.find((t) => t[0] === u.id).slice(5, 7), [2, 4]);
   h.run(2.1);
   assert.equal(u.skill.active, false);
   assert.equal(u.skill.charges, 0);
   approx(u.s.atk, 100);
-  assert.ok(u.rangeKeys.length < extended);
-  assert.deepEqual(u.rangeKeys, u.baseRangeKeys, 'range returns to the original grid');
+  assert.deepEqual(u.rangeKeys, u.baseRangeKeys);
   h.run(2);
   const late = h.hooksOf('damaged').filter((c) => c.source === u && c.t > 4.5);
   assert.ok(late.length && late.every((c) => c.type === 'phys'));
-  assert.ok(!e.s.flags.cold);
-  assert.equal(h.hooksOf('statusApplied').filter((c) => c.source === u && c.status === 'cold' && c.t > 4.5).length, 0,
-    'late attacks apply no new skill status');
+  assert.equal(h.hooksOf('statusApplied').filter((c) => c.source === u && c.status === 'cold').length, 0,
+    'passive proc parameters do not become attack statuses');
   assert.equal(p.skill.kind, 'passive');
   assert.equal(p.skill.active, true);
   approx(p.s.atk, 200);
