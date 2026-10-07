@@ -141,7 +141,7 @@ import { PlayerState } from './PlayerState.js';
 import { buildDeployMap, boardOrder, pieceDir } from './board.js';
 import { bondList, offBondCounts } from './bondsMeta.js';
 import { EffectDispatcher, getDefaultRegistry } from './effectsMeta.js';
-import { generateDraft, applyCard, cardView, bountyBattles, isMultiRoundBounty } from './choices.js';
+import { generateDraft, applyCard, cardView, bountyBattles, isMultiRoundBounty, bountyCard } from './choices.js';
 import { setupMatchWaves, buildNormalWave, buildBossWave, bountySpawns, withBounties, previewOf, weightedPick } from './waves.js';
 import { planUnite, uniteBattleOpts, uniteSurvivors } from './unite.js';
 import { pairPlayers, bossPoolHp, SharedBossPool, hiddenEligible, BOSS_HIT_STEPS } from './finalAssault.js';
@@ -1088,7 +1088,9 @@ export class Match {
       case 'g.art': return ps.useArt(msg.itemUid, msg.row, msg.col, msg.dir);
       case 'g.destroy': return ps.destroy(msg.uid);
       case 'g.reward': return ps.pickReward(msg.idx);
-      case 'g.choice': return this.pickCard(ps, msg.idx);
+      case 'g.choice': return msg.choiceId !== undefined
+        ? this.pickPersonalChoice(ps, msg.idx, msg.choiceId)
+        : this.pickCard(ps, msg.idx);
       case 'g.ready': return ps.setReady(!!msg.ready);
       case 'g.emote': return this.emote(ps, msg.id);
       case 'g.watch': return this.watch(ps, msg.fieldId);
@@ -1637,6 +1639,42 @@ export class Match {
     this.enterPrep();
   }
 
+  /** 教鞭: draw once, privately, without changing the PREP clock or consuming the Art here. */
+  offerBountyChoice(ps, candidates, sourceItemId) {
+    if (this.phase !== PHASE.PREP) return fail(ERR.WRONG_PHASE);
+    if (!ps.alive) return fail(ERR.ELIMINATED);
+    if (ps.ready) return fail(ERR.WRONG_PHASE, 'ready');
+    if (ps.personalChoice) return fail(ERR.BAD_TARGET, '请先完成当前教鞭选择');
+    if (!candidates.length) return fail(ERR.BAD_TARGET, '当前没有可用的战术特训');
+    const cards = this.rngMeta.shuffle(candidates.slice()).slice(0, 3);
+    ps.personalChoice = { id: `${this.battlePrefix}.choice.${this.nextUid()}`, round: this.round, sourceItemId, cards };
+    ps.dirty();
+    return OK;
+  }
+
+  pickPersonalChoice(ps, idx, choiceId) {
+    if (this.phase !== PHASE.PREP) return fail(ERR.WRONG_PHASE);
+    if (!ps.alive) return fail(ERR.ELIMINATED);
+    if (ps.ready) return fail(ERR.WRONG_PHASE, 'ready');
+    const pending = ps.personalChoice;
+    if (!pending || pending.id !== choiceId || pending.round !== this.round) return fail(ERR.BAD_TARGET);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= pending.cards.length) return fail(ERR.BAD_TARGET);
+    if (!this.addBounty(ps, pending.cards[idx])) return fail(ERR.BAD_TARGET);
+    ps.personalChoice = null;
+    ps.dirty();
+    return OK;
+  }
+
+  autoPickPersonalChoice(ps, mode) {
+    const pending = ps.personalChoice;
+    if (!pending) return;
+    const indices = pending.cards.map((c, i) => i);
+    const idx = mode === 'bot'
+      ? botPickCard(this, ps, pending.cards.map((c) => bountyCard(this.gd, c)), indices)
+      : this.rngMeta.pick(indices);
+    return this.pickPersonalChoice(ps, idx, pending.id);
+  }
+
   addBounty(ps, card) {
     if (!ps || !card || !this.gd.enemy(card.enemyKey)) return null;
     // a multi-round card lasts MULTI_ROUND_BOUNTY_BATTLES battles (choices.js; the user's call after playtest #6)
@@ -1780,6 +1818,7 @@ export class Match {
     };
     const ready = () => {
       if (!ps.ready) {
+        this.autoPickPersonalChoice(ps, 'random');
         ps.resolveTemp();
         ps.setReady(true);
       }
@@ -1831,6 +1870,7 @@ export class Match {
     if (this.phase !== PHASE.PREP) return;
     for (const ps of this.alivePlayers()) {
       if (ps.ready) continue;
+      this.autoPickPersonalChoice(ps, 'random');
       ps.resolveTemp();
       ps.ready = true;
       ps.dirty();
@@ -3059,13 +3099,13 @@ export class Match {
   }
 
   /**
-   * Bounties after a boss field: kill-bounty coins go to pending funds (spent in the Hidden Core's prep) and every
+   * Bounties after a boss field: kill coins and eligible perfect-card payouts go to pending funds, and every
    * bounty used one of its battles, exactly like SETTLE does for normal rounds.
    */
-  _settleBossBounties(ps, pp) {
-    const coins = Math.max(0, Math.trunc(Number(pp.coins) || 0));
+  _settleBossBounties(ps, pp, perfect) {
+    let coins = Math.max(0, Math.trunc(Number(pp.coins) || 0));
+    if (perfect) for (const b of ps.bounties) if (b.card.payout === 'perfect') coins += b.card.coin;
     if (coins > 0) { ps.pendingFunds += coins; ps.stats.fundsGained += coins; }
-    if (!ps.bounties.length) return;
     for (const b of ps.bounties) b.roundsLeft--;
     ps.bounties = ps.bounties.filter((b) => b.roundsLeft > 0);
     ps.dirty();
@@ -3158,6 +3198,8 @@ export class Match {
   _finishFinal(hidden, resultOf) {
     if (this.phase !== (hidden ? PHASE.HIDDEN_CORE : PHASE.FINAL_ASSAULT)) return;
     this._stopClientCombat();
+    // The first end registered by the server decides; a late field result cannot turn defeat into victory.
+    const victory = this._finalEnding ? this._finalEnding === 'cleared' : this.bossPool.hp <= 0;
     for (const f of this.fields) {
       const res = resultOf(f);
       this._collectSimErrors(f, res);
@@ -3172,13 +3214,14 @@ export class Match {
           ps.dirty(); // m.private.stats
           this._charDamageTickers(ps, pp);
         }
-        if (pp && ps) this._settleBossBounties(ps, pp);
+        if (pp && ps) {
+          const perfect = victory && !res.synthetic && pp.perfect === true
+            && !(pp.leaked || []).some((l) => l && l.counted !== false);
+          this._settleBossBounties(ps, pp, perfect);
+        }
         if (pp && ps) this.dispatch(ps, 'onBattleResult', { result: pp, lpLoss: 0, perfect: !!pp.perfect, boss: true });
       }
     }
-    // the end condition the server registered first decides (client-side combat: _endFinal — pool 0 → victory, team LP 0
-    // → defeat); a boss field's final result may never turn a defeat into a victory (user playtest #6 item 5)
-    const victory = this._finalEnding ? this._finalEnding === 'cleared' : this.bossPool.hp <= 0;
     this._syncTeamLp();
     this.deadline = 0;
     this.overtimeAt = 0;

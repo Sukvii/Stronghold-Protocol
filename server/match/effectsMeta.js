@@ -633,6 +633,7 @@ export function makeCtx(m, ps, source, hook, ev = null) {
 
     // ---- bounties / choices
     addBounty: (card) => m.addBounty(ps, card),
+    offerBountyChoice: (cards, sourceItemId) => m.offerBountyChoice(ps, cards, sourceItemId),
 
     // ---- messaging
     toast: (text, kind = 'info') => m.toast(ps, kind, String(text)),

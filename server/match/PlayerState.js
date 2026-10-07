@@ -77,7 +77,7 @@ import { attackRangeGrid, loadoutRecord, resolveRecordLoadout } from '../../shar
 import { offsetTile } from '../sim/dir.js';
 import { computeBonds, bondList, bondSnapshot, activatedLayers, bondsWithGains, offBondCounts } from './bondsMeta.js';
 import { itemKey } from './gamedata.js';
-import { bountyText } from './choices.js';
+import { bountyText, bountyCard } from './choices.js';
 
 const HAND_SIZE = GEO.HAND_SIZE;
 const TEMP_SIZE = GEO.TEMP_SIZE;
@@ -140,6 +140,8 @@ export class PlayerState {
     this.effects = [];
     /** active bounties: { id, card, roundsLeft, chooser } */
     this.bounties = [];
+    /** Pending 教鞭 choice: { id, round, sourceItemId, cards } (raw bounty records, private to this player). */
+    this.personalChoice = null;
     /** free-form counters for content (ctx.counter / setCounter) */
     this.counters = {};
     /** per-round counters (reset at round start) */
@@ -1423,6 +1425,7 @@ export class PlayerState {
   setReady(on) {
     if (!this.alive) return fail(ERR.ELIMINATED);
     if (this.m.phase !== PHASE.PREP) return fail(ERR.WRONG_PHASE);
+    if (on && this.personalChoice) return fail(ERR.BAD_TARGET, '请先完成教鞭选择');
     if (on && !this.tempEmpty) return fail(ERR.TEMP_NOT_EMPTY);
     if (this.ready === !!on) return OK;
     this.ready = !!on;
@@ -1638,7 +1641,13 @@ export class PlayerState {
       funds: this.funds,
       bandId: this.bandId,
       ready: this.ready,
-      canReady: this.alive && this.tempEmpty && this.m.phase === PHASE.PREP,
+      canReady: this.alive && this.tempEmpty && !this.personalChoice && this.m.phase === PHASE.PREP,
+      personalChoice: this.personalChoice ? {
+        id: this.personalChoice.id,
+        round: this.personalChoice.round,
+        sourceItemId: this.personalChoice.sourceItemId,
+        cards: this.personalChoice.cards.map((c) => bountyCard(this.gd, c)),
+      } : null,
       shop: {
         level: this.shop.level,
         maxLevel: this.gd.maxShopLevel,

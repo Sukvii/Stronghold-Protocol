@@ -11,7 +11,7 @@ import { fieldModel } from '../../server/match/bot.js';
 import { FIELD, parseKey } from '../../server/match/board.js';
 import { createRng } from '../../server/sim/rng.js';
 import { FakeBattle } from './fakeBattle.js';
-import { DATA, makeMatch, checkInvariants } from './harness.js';
+import { DATA, makeMatch, checkInvariants, giveItem } from './harness.js';
 
 const bossFields = () => FakeBattle.instances.filter((b) => b.kind === 'boss' || b.kind === 'hidden');
 
@@ -53,6 +53,58 @@ test('multi-round bounties spawn in the Final Assault on the owner\'s half, show
   assert.equal(p0.bounties[0].roundsLeft, bountyBattles(card) - 1, 'the Final Assault used one of the bounty\'s battles');
   assert.equal(p0.pendingFunds, pending + 3, 'kill-bounty coins of the boss field are credited (spent in the Hidden Core prep)');
   checkInvariants(m);
+  m.dispose();
+});
+
+test('R14 教鞭: perfect card funds join kill coins at R15 income; each bounty uses a battle before Hidden Core', () => {
+  const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 2, seed: 61, fake: true,
+    script: (b) => (b.kind === 'boss' || b.kind === 'hidden' ? { bossDps: 1e9, coins: { p_0: 3 } } : {}) }).start();
+  const m = h.m;
+  h.toPrep(14);
+  const ps = h.ps('p_0');
+  m.addBounty(ps, everyBattleBounty(m.gd));
+  const art = giveItem(m, ps, 'chess_item_6_03_m');
+  assert.deepEqual(ps.useArt(art.uid, 10, 5), { ok: true });
+  const card = ps.personalChoice.cards[0];
+  assert.deepEqual(m.handle(ps.playerId, { t: 'g.choice', idx: 0, choiceId: ps.personalChoice.id }), { ok: true });
+  const left = bountyBattles(card);
+  const pending = ps.pendingFunds;
+  h.drive(() => m.phase === PHASE.FINAL_ASSAULT);
+  m.hiddenLayerSum = 1e6;
+  assert.ok(bossFields()[0].opts.spawns.some((s) => s.tag === 'bounty' && s.enemyKey === card.enemyKey && s.ownerPlayerId === ps.playerId));
+  h.run(() => m.runner === null);
+  assert.equal(ps.pendingFunds, pending + 3 + card.coin, 'one card amount, regardless of its enemy count');
+  assert.equal(ps.bounties.some((b) => b.card.effectId === card.effectId), left > 1);
+  if (left > 1) assert.equal(ps.bounties.find((b) => b.card.effectId === card.effectId).roundsLeft, left - 1);
+  h.toPrep(15);
+  assert.equal(ps.pendingFunds, 0);
+  assert.equal(ps.funds, m.gd.income(15) + pending + 3 + card.coin, 'base income is separate from the R14 bounty funds');
+  const hiddenArt = giveItem(m, ps, 'chess_item_6_03_m');
+  assert.deepEqual(ps.useArt(hiddenArt.uid, 10, 5), { ok: true });
+  const hiddenCard = ps.personalChoice.cards[0];
+  assert.deepEqual(m.handle(ps.playerId, { t: 'g.choice', idx: 0, choiceId: ps.personalChoice.id }), { ok: true });
+  const existingPerfect = ps.bounties.filter((b) => b.card.payout === 'perfect').reduce((n, b) => n + b.card.coin, 0);
+  h.drive(() => m.phase === PHASE.HIDDEN_CORE);
+  assert.ok(bossFields().at(-1).opts.spawns.some((s) => s.tag === 'bounty' && s.enemyKey === hiddenCard.enemyKey));
+  h.runToEnd();
+  assert.equal(ps.pendingFunds, 3 + existingPerfect, 'Hidden Core uses the same perfect settlement');
+  checkInvariants(m);
+  m.dispose();
+});
+
+test('boss victory without a perfect own result keeps kill coins but gives no perfect-card funds', () => {
+  const h = makeMatch({ mode: 'coop', humans: 2, seed: 61, fake: true,
+    script: (b) => (b.kind === 'boss' ? { bossDps: 1e9, leaks: { p_0: 1 }, coins: { p_0: 3 } } : {}) }).start();
+  h.toPrep(14);
+  const m = h.m, ps = h.ps('p_0');
+  const card = DATA.choices.cards.bounty.find((c) => c.payout === 'perfect' && !m.gd.inactiveEnemies.has(c.enemyKey));
+  m.addBounty(ps, { ...card, rounds: 2, multiRound: false });
+  const gained = ps.stats.fundsGained;
+  const result = h.drive(() => h.ended != null);
+  assert.ok(result && h.ended.victory);
+  assert.equal(ps.pendingFunds, 3);
+  assert.equal(ps.stats.fundsGained, gained + 3);
+  assert.equal(ps.bounties[0].roundsLeft, 1);
   m.dispose();
 });
 

@@ -211,17 +211,19 @@ export function tempReadyReason(priv) {
 export function ReadyToggle({ priv, onToggle, busy, readyCount, total }) {
   const ready = !!priv?.ready;
   const temp = tempInfo(priv);
-  const reason = !ready ? tempReadyReason(priv) || shopBlockReason('ready', { priv, editable: true }) : null;
+  const reason = !ready ? (priv?.personalChoice ? shopBlockReason('ready', { priv, editable: true })
+    : tempReadyReason(priv) || shopBlockReason('ready', { priv, editable: true })) : null;
   const btn = html`<button type="button" class=${cx('readybtn', 'tapx', ready && 'is-on', busy && 'is-busy')} disabled=${!!reason || busy}
-      aria-pressed=${ready ? 'true' : 'false'} aria-describedby=${!ready && temp.count ? 'readywrap-why' : undefined} onClick=${() => onToggle(!ready)}>
+      aria-pressed=${ready ? 'true' : 'false'} aria-describedby=${reason ? 'readywrap-why' : undefined} onClick=${() => onToggle(!ready)}>
     <span class="readybtn__box">${ready ? html`<${Icon} name="check" />` : null}</span>
     <span class="readybtn__label">${ready ? '取消准备' : '准备就绪'}</span>
     <kbd class="readybtn__key">Space</kbd>
   </button>`;
   return html`<div class="readywrap">
     ${reason ? html`<${Tooltip} text=${reason} placement="bottom">${btn}<//>` : btn}
-    ${!ready && temp.count ? html`<span class="readywrap__why" id="readywrap-why" role="status" data-testid="ready-why">
-      <${Icon} name="warn" /><span>临时整备区 <b class="num">${temp.count}</b> 个单位待处理</span></span>` : null}
+    ${reason ? html`<span class="readywrap__why" id="readywrap-why" role="status" data-testid="ready-why">
+      <${Icon} name="warn" />${priv?.personalChoice || !temp.count ? html`<span>${reason}</span>`
+        : html`<span>临时整备区 <b class="num">${temp.count}</b> 个单位待处理</span>`}</span>` : null}
     ${Number.isFinite(total) && total > 1 ? html`<span class="readywrap__count">已就绪 <b class="num">${readyCount}</b>/<span class="num">${total}</span></span>` : null}
   </div>`;
 }

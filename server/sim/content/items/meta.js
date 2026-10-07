@@ -22,8 +22,8 @@
 //   “神秘顾客”  the same trap_create_self_choice ("选择一项特殊悬赏任务"; no band grants it in act2, research 04): a band
 //               bounty `enemyeffect_b_*` (research 04 §7 [ASSUMED]: "adds 1 enemy to your next battle, killer gets `coin`
 //               funds").
-//               Both: [ASSUMED simplification, engine: no PERSONAL_CHOOSE overlay] 3 cards whose enemy can appear in the
-//               mode are drawn and one of them is taken at random; the built-in runs when the family is empty.
+//               教鞭 offers up to 3 mode-eligible cards for a personal choice within the current PREP deadline.
+//               “神秘顾客” keeps the random pick of 3 cards, with the built-in fallback when its family is empty.
 //   “神秘顾客”  trap_disney_special: when actively destroyed, +count funds and the Art passes to the next alive player
 //               (seat order, cyclic)
 //   天师古鼎     equip_with_another_gain_coin_when_gain_char: a 【炎】 carrier also holding 炎国短刀 (either quality)
@@ -48,7 +48,7 @@ function pieceIsMember(ctx, piece, bondId) {
   return bonds.includes('maniShip') && isCoreBond(bondId) && ctx.bondActive('maniShip') && ctx.bondActive(bondId);
 }
 
-/** Offer size of the personal bounty choice (PRTS 法术 教鞭 "于3个战术特训的悬赏任务中选择一项"). */
+/** Cards drawn before “神秘顾客” takes one at random. */
 const OFFER_SIZE = 3;
 /** cards.bounty entries matching `test` whose enemy can appear in this mode. */
 function bountyCards(ctx, test) {
@@ -103,18 +103,24 @@ export function registerMeta(registry) {
     },
   }));
 
-  // 教鞭 / “神秘顾客” — trap_create_self_choice {choice_event}: 教鞭 a 战术特训 card, “神秘顾客” a band bounty (enemyeffect_b_*)
-  for (const [key, family] of [['chess_item_6_03_m', isTraining], ['chess_item_6_01_m', isBandBounty]]) {
-    wrap(registry, key, (base) => ({
-      onArt(ctx, ev) {
-        const cards = bountyCards(ctx, family);
-        if (!cards.length) { if (typeof base.onArt === 'function') base.onArt.call(base, ctx, ev); return; }
-        const offer = ctx.rng.shuffle(cards.slice()).slice(0, OFFER_SIZE);
-        const card = ctx.rng.pick(offer);
-        if (!card || !ctx.addBounty(card)) { ev.error = 'BAD_TARGET'; ev.detail = 'no bounty available'; }
-      },
-    }));
-  }
+  // 教鞭 — trap_create_self_choice {choice_event}: the server keeps the offered 战术特训 cards until confirmed.
+  wrap(registry, 'chess_item_6_03_m', () => ({
+    onArt(ctx, ev) {
+      const result = ctx.offerBountyChoice(bountyCards(ctx, isTraining), ev.item.id);
+      if (!result.ok) { ev.error = result.error; ev.detail = result.detail; }
+    },
+  }));
+
+  // “神秘顾客” — a random band bounty (enemyeffect_b_*).
+  wrap(registry, 'chess_item_6_01_m', (base) => ({
+    onArt(ctx, ev) {
+      const cards = bountyCards(ctx, isBandBounty);
+      if (!cards.length) { if (typeof base.onArt === 'function') base.onArt.call(base, ctx, ev); return; }
+      const offer = ctx.rng.shuffle(cards.slice()).slice(0, OFFER_SIZE);
+      const card = ctx.rng.pick(offer);
+      if (!card || !ctx.addBounty(card)) { ev.error = 'BAD_TARGET'; ev.detail = 'no bounty available'; }
+    },
+  }));
 
   // 画卷 — trap_copy_front_char: copy the operator in range (elite status included) with its equipment. A copied
   // normal item that completes a pair with an owned one merges at once and the golden stays in the hand (research 04

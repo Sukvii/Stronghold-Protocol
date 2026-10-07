@@ -416,6 +416,7 @@ Writes (all validated, never throw on bad input, never make funds / pools negati
 | `setDeviceActive(alias, on)` / `setTileOverride(r, c, 'melee'\|'ranged'\|'none')` | terrain changes of this player's board (legality + battle input `deviceOverrides`) |
 | `addEffect(ref)` / `removeEffect(id)` / `setEffectCounter(id, v)` | EffectRefs `{ id, key?, name, desc, iconKind, iconId, counter?, battle=true, params?, data?, hidden? }` — shown in `m.private.effects`, passed to battles as `playerEffects` when `battle` |
 | `addBounty(card)` | a bounty (choices.json cards.bounty shape) on the next battles |
+| `offerBountyChoice(cards, sourceItemId)` | offer up to 3 raw bounty cards privately in PREP; returns `{ ok: true }` or `{ error, detail? }`; confirmation adds the bounty |
 | `toast(text, kind)` / `ticker(text)` / `giftTicker(fromName, chessId)` | messages |
 | `teammates()` / `player(playerId)` | ctx objects of other alive players (team effects) |
 
@@ -446,20 +447,21 @@ bilibili BV1vzyVBuEN9 ≈ 8:24 / BV1Qkw1zMEoR ≈ 7:25, pointed out in PR #2 —
 is not consumed: PRTS 下半 记录 备注 "生效时，原干员销毁，获得一名高一阶的随机初始干员（最高六阶）", PRTS 卫戍协议/帮助 "佩戴的
 装备无法手动卸除，在失去该干员（干员出售、销毁、合并等）…时自动卸除", players re-inject it every round; player feedback after
 0.1.0), 画卷 (copy the operator in range with its
-items), 教鞭 / “神秘顾客” (a random bounty is added).
+items), 教鞭 (a personal 战术特训 choice), “神秘顾客” (a random bounty is added).
 
-**教鞭 / “神秘顾客” stay a random bounty (deliberate).** The official Arts open a personal 悬赏 choice
-("选择一项（特殊）悬赏任务进行挑战", `choice_event hunter_band_1`). The server applies a random bounty instead: content
-(server/sim/content/items/meta.js) draws 3 cards and takes one at random — 教鞭 from the 20 战术特训 cards (payout
-`perfect`: extra enemies, the card's coins when the own phase is perfect; PRTS 下半 记录 §法术 教鞭 "于3个战术特训的悬赏
-任务中选择一项", §机变阶段 "※以下悬赏任务仅由法术教鞭生成", 杜宾 加练！ "若自身战斗完美作战可获得资金"; user playtest #6
-item 4 review), “神秘顾客” (granted by nothing in act2) from the band-bounty family `enemyeffect_b_*` [ASSUMED] — each
-limited to enemies the mode can field (the built-in fallback: a random tier ≤ II bounty of `cards.bounty`), and adds it
-with `ctx.addBounty`. A personal choice overlay would need its own phase / protocol message outside SP_DRAFT (a
-second, simultaneous draft in co-op, with timers and AI takeover) for a rarely used Art, while the random pick keeps the
-risk / reward the item is about. The
-bounty then behaves like any other (next battles, 联防 payouts, Final Assault spawns). 神秘顾客's destroy clause (+1
-fund, the Art passes to the next alive player) is content too (`onDestroy`).
+**教鞭：PREP 内个人选择。** 内容 handler 从 `payout: 'perfect'`、敌人存在且未被当前模式禁用的战术特训卡中，
+调用 `ctx.offerBountyChoice(cards, itemId)`；Match 抽取最多三张不同卡，保存到本人的 `personalChoice`。空池失败，
+道具和 Arts 次数不消费；候选不足三张时展示实际数量。创建候选成功即消费教鞭和一次 Arts，确认时才添加悬赏。
+每人最多一组待选，完成后可继续使用第二张教鞭，仍受每回合法术次数限制。候选只随本人 `m.private` 发送，
+重连恢复同一 ID 和卡片；`g.choice { idx, choiceId }` 按本人、ID 和当前回合校验，重复或过期请求不能再次添加悬赏。
+选择沿用当前 PREP 剩余时间，不改阶段或延长期限；待选阻止 Ready，到期先随机选定再处理临时区和结束 PREP。
+AI 接管先选，使用每张教鞭后立即选，最后 Ready 前再次处理；异常收尾走原调度回调的随机选择。单真人房间继续无期限。
+卡面和悬赏效果复用 `bountyCard` / `bountyText`，持续场数仍由 `bountyBattles` 决定。
+PRTS 下半记录 §法术和 §机变阶段支持三选一及本人完美作战领取卡面资金的规则；R14 / 隐藏首领战允许使用，
+且首领战也要求完美，依据用户的原游戏实测与确认。首领完美型资金按下文现有个人完美语义结算。
+
+**“神秘顾客”：随机悬赏。** 从 `enemyeffect_b_*` 家族 [ASSUMED] 的模式可用卡中抽三张并随机取一张，
+调用 `ctx.addBounty`；家族为空时仍走内建随机 tier ≤ II 悬赏。主动销毁时 +1 资金，并按座位顺序转交下一位存活玩家。
 EffectRefs: `effect:builtin_round_coin`, `effect:builtin_gift`, `effect:builtin_next_buy_golden_item` (整备),
 `effect:builtin_next_buy_elite` (升华). An eliminated player gets no dispatch, except an EffectRef whose handler sets
 `afterElimination: true` (its `onRoundStart` still runs: `EffectDispatcher.dispatchEliminated`, called by
@@ -582,7 +584,7 @@ Any `choice:` handler whose EffectRef reuses its own key must guard like this (o
   `enemyScale[r]` × the tuning layer §3.1, bounties, boss templates, 联防 routing). Bounties with battles left (every one
   that lasts more than one battle; an official multi-round card lasts two, §1.2) also spawn in the Final Assault /
   Hidden Core, on the owner's half of the boss field (a route ending at its goal); the boss battle then uses up one of
-  the bounty's battles and its kill coins go to pending funds.
+  the bounty's battles; kill coins and eligible perfect-card funds go to pending funds for the next round's income.
 * **Combat time limit**: data `combatTimeLimit` (the level's `maxPlayTime`) counts REAL seconds of the forced 2×
   battle; the Battle / 联防 limit is `gd.combatTimeLimit(r)` = 2 × that in game seconds (`config.combatTimeScale`,
   default 2). Read as game seconds the rounds' own spawn schedules would not fit (R2's last flyer spawns at 43 s of
@@ -627,6 +629,13 @@ Any `choice:` handler whose EffectRef reuses its own key must guard like this (o
   sim (`sim/damage.js leaderHitCancelled`, SIM.md §4) — it deals 0 and nothing reaches the shared pool, the per-player
   boss damage or the BOSS_HIT tickers; minions, parts, normal rounds and 联防 are unaffected. The server's own runs, the
   browsers' runs and the server's verification share the rule, so digests agree.
+  **首领完美型赏金**：`_finishFinal` 以全场权威胜利、实际接受的非 `synthetic` 结果、本人 `pp.perfect === true`，
+  且本人无 `counted !== false` 漏怪为资格。每张服务器持有的 `payout: 'perfect'` 悬赏发一次 `card.coin`，不乘敌人数；
+  与实际击杀金币一起进入 `pendingFunds` / `stats.fundsGained`，随后统一扣减一次持续场数；R14 奖金经原 `onIncome`
+  流程在 R15 入账。队伍胜利或仅击杀悬赏怪不单独构成资格，补造结果的默认 perfect 也不发奖；全场胜利后的
+  真实单场 `forced` 结果可以符合资格。该判断沿用 master 的个人完美语义，不额外要求 `killed === total`，
+  也不重定义另一半场漏怪、首领直接扣生命、超时扣血或血池清空时未击杀／未出场敌人的基础完美规则。
+  普通回合 `perfectRounds` 和 `onBattleResult` 的输入契约不变。
 
 ### 3.1 Balance layer (data/tuning.json)
 `data/config.json` is generated and stays research-faithful. There is **no custom balance** any more (DESIGN §14

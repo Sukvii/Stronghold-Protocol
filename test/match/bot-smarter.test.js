@@ -38,6 +38,16 @@ test('bounty pick: the card the own board can beat, never one it cannot (even wh
   assert.equal(botPickCard(m, ps, [hard, easy, huge].map((c, idx) => ({ ...c, idx })), [0, 1, 2]), 1);
   ps.lp = 2;
   assert.equal(botPickCard(m, ps, [hard, huge, easy].map((c, idx) => ({ ...c, idx })), [0, 1, 2]), 2, 'low LP: still the beatable one');
+  const raw = [hard, easy].map((c) => DATA.choices.cards.bounty.find((x) => x.effectId === c.id));
+  assert.deepEqual(m.offerBountyChoice(ps, raw, 'chess_item_6_03_m'), { ok: true });
+  assert.deepEqual(m.autoPickPersonalChoice(ps, 'bot'), { ok: true });
+  assert.equal(ps.personalChoice, null);
+  assert.equal(ps.bounties.at(-1).card.enemyKey, easy.enemyKey, 'personal cards use bounty scoring too');
+  const metaState = m.rngMeta.state(), botState = m.rngBots.state();
+  m.autoPickPersonalChoice(ps, 'bot');
+  m.autoPickPersonalChoice(ps, 'random');
+  assert.equal(m.rngMeta.state(), metaState);
+  assert.equal(m.rngBots.state(), botState, 'nothing pending: no RNG draws');
   m.dispose();
 });
 
@@ -129,9 +139,12 @@ test('bounty Arts (教鞭): kept after a battle with leaks, used after a perfect
     assert.ok(owns(ps, WHIP), 'kept after a battle with leaks (not destroyed)');
     h.run(() => m.phase === PHASE.PREP && m.round === 4);
     m.lastResults.set(ps.playerId, clean);
+    giveItem(m, ps, WHIP);
     const bounties = ps.bounties.length;
     h.run(() => m.phase === PHASE.COMBAT && m.round === 4);
-    assert.ok(!owns(ps, WHIP) && ps.bounties.length > bounties, 'used after a perfect battle');
+    assert.ok(!owns(ps, WHIP) && ps.bounties.length === bounties + 2, 'both Arts used and picked after a perfect battle');
+    assert.equal(ps.personalChoice, null);
+    assert.equal(ps.round.arts, 2);
     assert.equal(m.errorCount, 0);
     m.dispose();
   }

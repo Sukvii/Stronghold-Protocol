@@ -801,7 +801,10 @@ export function offerHeader(offer) {
 export function shopBlockReason(kind, { priv, editable, slot, getChess, getItem } = {}) {
   if (!priv) return '尚未就绪';
   if (priv.alive === false) return '你已被淘汰';
-  if (kind === 'ready') return priv.canReady === false ? '临时整备区不为空，请先处理溢出的资源' : null;
+  if (kind === 'ready') {
+    if (priv.personalChoice) return '请先完成教鞭选择';
+    return priv.canReady === false ? '临时整备区不为空，请先处理溢出的资源' : null;
+  }
   if (!editable) {
     if (kind === 'reward') return '当前无法选择';
     return priv.ready ? '已准备就绪，取消准备后才能操作' : '当前阶段无法进行该操作';
@@ -1469,6 +1472,18 @@ export function normalizeSp(sp, players = []) {
     desc: typeof sp.desc === 'string' && sp.desc ? sp.desc : null,
     untimed: !!sp.untimed,
     cards, order, turnPid, pickOf, takenBy, pickedCount: pickOf.size,
+  };
+}
+
+/** Adapt only the recipient's current PREP choice; never write it into the public draft. */
+export function normalizePersonalChoice(pub, priv, myId) {
+  const choice = priv?.personalChoice;
+  if (pub?.phase !== PHASE.PREP || !priv || priv.playerId !== myId || priv.alive === false
+    || !choice || choice.round !== pub.round) return null;
+  return {
+    ...normalizeSp({ family: 'bounty', name: '教鞭 · 战术特训', desc: '请选择一项战术特训',
+      cards: choice.cards, turn: myId, order: [myId], picks: {} }),
+    id: choice.id,
   };
 }
 
