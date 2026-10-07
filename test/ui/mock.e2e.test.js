@@ -15,7 +15,7 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -357,6 +357,14 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
 
   test('教鞭: PREP cards confirm twice, use its timer, reset on a new ID; old replies cannot clear a new busy pick', async () => {
     const { page, problems } = await open('phase=PREP', { render: 'fallback' });
+    await page.click('.gm__gear');
+    await page.waitForSelector('.modal .set-keys');
+    await page.click('.set-key[data-action="ready"]');
+    await page.waitForSelector('.set-key.is-waiting[data-action="ready"]');
+    await page.keyboard.press('KeyW');
+    await page.waitForFunction(() => document.querySelector('.set-key[data-action="ready"]')?.textContent.trim() === 'W');
+    await page.click('.modal__actions .btn--primary');
+    await page.waitForSelector('.modal', { hidden: true });
     const deadline = await page.evaluate(() => globalThis.__MOCK__.S().pub.deadline);
     const first = await useWhip(page);
     await page.waitForSelector('.spov[aria-label="教鞭选择"]');
@@ -366,11 +374,27 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
     assert.doesNotMatch(await page.$eval('.spov', (el) => el.textContent), /机变阶段|当前轮到|正在决策/);
     assert.equal(await page.$eval('.readybtn', (el) => el.disabled), true);
     assert.match(await page.$eval('[data-testid="ready-why"]', (el) => el.textContent), /请先完成教鞭选择/);
+    await page.evaluate(async () => { await (await import('/js/ui/lang.js')).loadLangIndex(); });
+    for (const lang of ['en', 'ja', 'ko', 'zh-TW']) {
+      const messages = JSON.parse(readFileSync(path.join(ROOT, `public/i18n/${lang}.json`), 'utf8'));
+      await page.evaluate(async (code) => {
+        await (await import('/js/ui/lang.js')).switchLang(code);
+        globalThis.__MOCK__.pushPublic(); // this harness has no App/useLang root; render again with the active language
+      }, lang);
+      await page.waitForFunction((label) => document.querySelector('.spov')?.getAttribute('aria-label') === label, {}, messages['教鞭选择']);
+      assert.equal(await page.$eval('.spov__title', (el) => el.textContent), `${messages['教鞭 · 战术特训']}|${messages['请选择一项战术特训']}`);
+      assert.match(await page.$eval('.spov__sub', (el) => el.textContent), new RegExp(messages['休整期结束时未选择将自动选定']));
+      assert.equal(await page.$eval('[data-testid="ready-why"]', (el) => el.textContent), messages['请先完成教鞭选择']);
+      assert.equal((await mockState(page)).personalChoice.id, first.id, 'language switch keeps the same pending offer');
+    }
+    await page.evaluate(async () => { await (await import('/js/ui/lang.js')).switchLang('zh'); globalThis.__MOCK__.pushPublic(); });
+    await page.waitForSelector('.spov[aria-label="教鞭选择"]');
     const requests = await page.evaluate(() => globalThis.__MOCK__.S().requests.length);
-    for (const key of ['Space', 'KeyR', 'KeyF', 'KeyD', 'KeyQ', 'KeyX']) await page.keyboard.press(key);
+    for (const key of ['KeyW', 'KeyR', 'KeyF', 'KeyD', 'KeyQ', 'KeyX']) await page.keyboard.press(key);
     await sleep(150);
     assert.equal(await page.evaluate(() => globalThis.__MOCK__.S().requests.length), requests, 'background shortcuts send no intents');
     assert.match(await page.$$eval('.toast', (els) => els.map((el) => el.textContent).join('\n')), /请先完成教鞭选择/);
+    assert.equal(await page.$eval('.readybtn__key', (el) => el.textContent), 'W');
     await page.click('.spcard.is-pickable');
     await page.waitForSelector('.spcard.is-armed');
     await page.keyboard.press('Escape');
@@ -438,6 +462,7 @@ describe('in-match UI (mock harness, headless Chrome)', { skip: !ENABLED && 'set
     await useWhip(page);
     await page.waitForSelector('.spov');
     await page.waitForFunction(() => !document.querySelector('.fwheel'));
+    await page.waitForFunction((sel, transform) => document.querySelector(sel)?.style.transform === transform, {}, selector, homeStyle);
     assert.equal(await page.$eval(selector, (el) => el.style.transform), homeStyle, 'cancelFacing released the held bench piece');
     assert.equal(await page.$('.ff-piece.is-draggable'), null);
     await page.click('.spcard.is-pickable');
