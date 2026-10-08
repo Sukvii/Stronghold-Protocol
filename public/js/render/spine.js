@@ -200,6 +200,36 @@ export class SpineActor {
     else if (this.mode === 'stun' && this.has(this.roles.stun?.loop)) this._play(this.roles.stun.loop, true);
   }
 
+  /** Refresh the pose after the bone spike's immediate stealth-form switch. */
+  syncFormPose() {
+    if (this.dead) return;
+    if (this.mode === 'attack') {
+      const track = this.spine.state.tracks[0];
+      const clip = this._attackClip();
+      if (!track || !clip) return;
+      const dur = this.dur(clip.loop);
+      const oldHit = this._hitTime(this.current, this.dur(this.current));
+      const hit = this._hitTime(clip.loop, dur);
+      const start = clampN(track.trackTime + hit - oldHit, 0, dur);
+      const lead = this.wound && this.windUntil != null
+        ? Math.max(0, this.windUntil - this.clock) : 0;
+      const ts = lead > 0 ? Math.max(0, hit - start) / lead : track.timeScale;
+      const tailTs = lead > 0 ? this.windTs : ts;
+      this._play(clip.loop, track.loop, { start, timeScale: ts, mix: 0 });
+      this.attackUntil = this.clock + lead +
+        Math.max(0, dur - (lead > 0 ? hit : start)) / tailTs;
+    } else if (this.mode === 'stun') {
+      const name = this.has(this.roles.stun?.loop) ? this.roles.stun.loop : this._baseName();
+      this._play(name, true, { mix: 0 });
+    } else if (this.mode === 'base') {
+      this._play(this._baseName(), true, { mix: 0 });
+    } else {
+      return;
+    }
+    // Apply the new attachments even when normal updates are frozen.
+    this.spine.update(0);
+  }
+
   /** Play a form's transition clip once; attacks and the resting state wait for it (mode 'change'). */
   _change(clip) {
     if (this.mode !== 'change') this.stunWanted = this.mode === 'stun';

@@ -190,6 +190,7 @@ export const EL_BAR = Object.freeze({ icon: 0.15, min: 8, max: 15, enemy: 0.8, g
  * → UnitView.setForm), per Spine id; the mode's roles override the manifest's (data/assets.json anims), `change` plays
  * once first:
  * - 掠海漂移体 (PRTS: 受晕眩/沉睡/冻结影响后进入爬行模式 — for good) crawls on its *_02 clips after 'Change';
+ * - 假想敌：骨刺 uses the manifest's *_A while the snapshot's UF.STEALTH is on, otherwise revealed *_B, immediately;
  * - 暴鸰 flies on its bomb-less *_2 clips once its one bomb left (the official prefab's mode S1: Move→Move_2, Idle→Idle_2,
  *   Die→Die_2; user feedback after 0.1.0, D4: the bomb used to stay under the drone — no change clip, the drop is its
  *   Attack clip);
@@ -273,6 +274,9 @@ export const FORMS = Object.freeze({
   }),
   enemy_2025_syufo: Object.freeze({
     crawl: Object.freeze({ change: 'Change', roles: clipSet('Idle_02', 'Move_02', 'Die_02', 'Attack_02') }),
+  }),
+  enemy_9008_acbunn: Object.freeze({
+    revealed: Object.freeze({ change: null, roles: clipSet('Idle_B', 'Move_B', 'Die_B', 'Attack_B') }),
   }),
   enemy_10081_mpplai: Object.freeze({
     translator_fuchou: Object.freeze({ change: 'A_Die_B', roles: clipSet('B_Idle', 'B_Move', 'B_Die', 'B_Attack') }),
@@ -600,6 +604,7 @@ export class UnitView {
         if (this.flags & UF.SKILL) this.actor.setSkill(true);
         this.actor.setBase(this._baseFromAnim());
         if (deployed != null) { this.actor.deploy(); if (deployed > 0) this.actor.update(deployed); }
+        if (id === 'enemy_9008_acbunn') this.actor.syncFormPose();
       }
     }, () => {
       if (req === this._spineReq) { this._spineBusy = false; this._stuckAt = 0; }
@@ -747,6 +752,15 @@ export class UnitView {
     const prevFlags = this.flags;
     this.flags = s.flags | 0;
     this.anim = s.anim | 0;
+    if (this.alive && this.isEnemy &&
+        (this.info.spine || this.info.defId) === 'enemy_9008_acbunn') {
+      const form = this.flags & UF.STEALTH ? null : 'revealed';
+      if (form !== this.form) {
+        this.setForm(form);
+        this.actor?.syncFormPose();
+        if (this.imp) this.imp.dirty = true;
+      }
+    }
     if (this.isEnemy && Math.abs(s.vx) > 0.08) this.visFacing = s.vx < 0 ? -1 : 1;
     if ((prevFlags ^ this.flags) & UF.SKILL) this.setSkill(!!(this.flags & UF.SKILL));
     if (this.anim === ANIM.DIE && this.alive) this.die();

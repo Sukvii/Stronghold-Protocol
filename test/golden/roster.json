@@ -1165,7 +1165,7 @@
           "coins": 12,
           "dmg": 1561453,
           "bossDmg": 0,
-          "heal": 30059,
+          "heal": 30396,
           "deaths": 1,
           "layerGains": {"lateranoShip":12,"preciShip":12,"sargonShip":26}
         }
@@ -1174,11 +1174,11 @@
         ["p1",1,"op","chess_char_6_03_b",2,"uniequip_002_yu",4558.4,1,3,0,0,0,0,0,0],
         ["p1",2,"op","chess_char_6_06_b",2,"uniequip_002_pepe",3620.85,1,6,0,0,0,0,0,0],
         ["p1",3,"op","chess_char_6_07_b",2,"uniequip_002_siege2",3820.43,1,9,0,0,0,0,0,0],
-        ["p1",4,"op","chess_char_6_20_a",2,null,1523.98,1,4,0,0,0,20701,40,2],
+        ["p1",4,"op","chess_char_6_20_a",2,null,1523.98,1,4,0,0,0,21039,40,2],
         ["p1",5,"op","chess_char_6_01_b",2,"uniequip_002_lemuen",1811.04,1,7,12,169583,0,0,16,5],
         ["p1",6,"op","chess_char_6_02_b",2,"uniequip_002_sbell2",4314.46,1,10,5,53428,1556,548,8,2],
         ["p1",7,"op","chess_char_6_04_b",2,"uniequip_002_skadi2",1968.74,1,13,3,31605,8646,121,0,4],
-        ["p1",8,"op","chess_char_6_05_b",2,"uniequip_002_pasngr",0,0,15,16,207958,8900,2823,36,7],
+        ["p1",8,"op","chess_char_6_05_b",2,"uniequip_002_pasngr",0,0,15,16,207958,9238,2823,36,7],
         ["p1",9,"op","chess_char_6_08_b",2,"uniequip_002_reed2",2054.98,1,5,3,77599,0,1994,8,1],
         ["p1",10,"op","chess_char_6_09_b",0,"uniequip_002_cello",1628.7,1,8,0,14472,0,0,4,4],
         ["p1",11,"op","chess_char_6_11_b",2,"uniequip_002_mlyss",2332.18,1,11,18,148198,1500,188,142,4],
@@ -1212,12 +1212,12 @@
         "enemy_1367_dseed": [2,2,0,0,9953],
         "enemy_1439_dslntf": [1,1,0,0,49766],
         "enemy_2002_bearmi_2": [1,1,0,0,18248],
-        "enemy_9008_acbunn": [1,1,0,2434,19907]
+        "enemy_9008_acbunn": [1,1,0,2771,19907]
       },
-      "hooks": [1,145,5849,513,513,1336,1487,3519,124,130,34,30,37,24659,381,5,122,0,1,124,11,6,0],
-      "events": {"atk":606,"bounty":6,"deploy":21,"die":130,"dmg":1407,"engage":12,"fx":260,"heal":185,"layer":11,"skill":64,"spawn":145,"status":385},
+      "hooks": [1,145,5849,513,513,1337,1488,3521,124,130,34,30,37,24659,381,5,122,0,1,124,11,6,0],
+      "events": {"atk":607,"bounty":6,"deploy":21,"die":130,"dmg":1408,"engage":12,"fx":260,"heal":187,"layer":11,"skill":64,"spawn":145,"status":385},
       "fx": {"beam":4,"bombard":31,"bombardShell":31,"burst":6,"camouflage":2,"copy":1,"dp":4,"explode":1,"garrison":8,"lightning":87,"link":1,"lock":37,"lure":2,"scorchBurst":17,"snow":7,"split":4,"storm":7,"summon":2,"talent":1,"tide":4,"wanted":3},
-      "snaps": "19eb7843 2593e6ad ced96303 5ffc34ca 8cbd7231 1e7d8197 948c256c bd58965c b2457d86 151be715 19fcaae7 098875f8 0e3baca8 3c739f96 4210ffa1 2d576f76 35e8b3e6 e853bd87 a170c428 32d5be0d"
+      "snaps": "19eb7843 2593e6ad ced96303 5ffc34ca 8cbd7231 1e7d8197 948c256c 70f4355d 51afcd73 b6fd0280 9c6adfce 2a96d355 6521bf19 bb2b6d83 7f4793e0 58560f03 4b4f7aa7 e7d7848e 42189f71 8762c2dc"
     },
     "roster-019": {
       "about": "pass 0 band 7: chess_char_6_15_b chess_char_6_19_b chess_char_5_01_b chess_char_5_05_b chess_char_6_17_b chess_char_6_13_b chess_char_6_14_b chess_char_6_16_b chess_char_6_18_b chess_char_6_20_b chess_char_5_02_b chess_char_5_03_b",

@@ -12,6 +12,10 @@ import * as enemiesMod from '../../server/sim/content/enemies.js';
 import * as bossesMod from '../../server/sim/content/bosses.js';
 import { spawnYanyou } from '../../server/sim/content/tokens.js';
 import { attackWindup } from '../../server/sim/ai.js';
+import { enemyStealthed } from '../../server/sim/targeting.js';
+import { flagsOf } from '../../server/sim/snapshot.js';
+import { TICK } from '../../server/sim/constants.js';
+import { UF } from '../../shared/constants.js';
 
 const E = JSON.parse(fs.readFileSync(new URL('../../data/enemies.json', import.meta.url), 'utf8'));
 const W = JSON.parse(fs.readFileSync(new URL('../../data/waves.json', import.meta.url), 'utf8'));
@@ -177,14 +181,193 @@ test(`${nm('enemy_10034_cnvsax')}: revealed (反隐) and not blocked it makes no
   approx(x0 - e.x, 4 * e.s.moveSpeed * 0.5, 0.02, 'walked the whole 4 s');
 });
 
-test(`${nm('enemy_9008_acbunn')}: attacks several targets at once while stealthed`, () => {
-  const h = arena({ units: [{ chessId: 't_gun', row: 10, col: 6 }, { chessId: 't_mage', row: 11, col: 6 }, { chessId: 't_blade', row: 10, col: 7 }], captureNoisy: true, hooks: ['attack'] });
+// 骨刺: real blocking / reveal inputs, with one attack window at a time so projectile damage can be grouped by attackId.
+function boneArena(o = {}) {
+  const h = arena({
+    units: ['t_wall', 't_wall2', 't_wall3', 't_wall4'].map((chessId, i) => ({ chessId, row: 9 + (i % 2), col: 6 + Math.floor(i / 2) })),
+    captureNoisy: true, hooks: ['attack', 'damaged'], ...o,
+  });
   h.step();
+  for (const u of h.allies()) h.b.addBuff(u, { key: 'test:noBlock', persist: true, flags: { noBlock: true } });
   const e = put(h, 'enemy_9008_acbunn', [9, 6]);
-  h.runUntil(() => e.stats.attacks >= 1, 10);
-  const atk = h.hooksOf('attack').find((c) => c.attacker === e);
-  assert.ok(atk.targets.length >= 2, `targets ${atk.targets.length}`);
+  return { h, e, wall: h.unit('t_wall') };
+}
+function boneState(e, stealth) {
+  assert.equal(enemyStealthed(e), stealth);
+  assert.equal(!!(flagsOf(e) & UF.STEALTH), stealth);
+  // This change keeps the engine's default attackAnim timing in every form.
+  approx(attackWindup(e), e.def.attackAnim.hit);
+  approx(attackWindup(e), 0.533);
+}
+function boneBlock(h, e, wall) {
+  h.b.removeBuff(wall, 'test:noBlock');
+  h.step(2);
+  assert.equal(e.blockedBy, wall);
+}
+function boneRelease(h, e, wall) {
+  h.b.addBuff(wall, { key: 'test:noBlock', persist: true, flags: { noBlock: true } });
+  h.b.releaseBlocked(wall);
+  assert.equal(e.blockedBy, null);
+}
+function boneAttack(h, e, count, afterShot = null) {
+  const attacks = () => h.hooksOf('attack').filter((c) => c.attacker === e);
+  const damage = () => h.hooksOf('damaged').filter((c) => c.source === e && c.dmg.isAttack);
+  const n = attacks().length, d = damage().length;
+  const hp = new Map(h.allies().map((u) => [u, u.hp]));
+  assert.ok(h.runUntil(() => attacks().length > n, 8), 'a new bone spike attack');
+  const atk = attacks()[n];
+  assert.equal(atk.targets.length, count);
+  assert.equal(new Set(atk.targets).size, count, 'distinct targets');
+  assert.equal(e.lastAttackAt, atk.t);
+  afterShot?.(atk);
+  h.run(0.8); // wait for the ranged shots, well before the next 4 s attack
+  assert.equal(attacks().length, n + 1, 'no extra attack');
+  const hits = damage().slice(d);
+  assert.equal(hits.length, count, 'one hit per target');
+  assert.equal(new Set(hits.map((c) => c.dmg.attackId)).size, 1, 'one damage attackId');
+  assert.deepEqual(hits.map((c) => c.target.id).sort((a, b) => a - b), atk.targets.map((u) => u.id).sort((a, b) => a - b));
+  for (const [u, before] of hp) {
+    const amount = atk.targets.includes(u) ? e.s.atk * (1 - u.s.res / 100) : 0;
+    approx(before - u.hp, amount, 1e-6, 'actual HP loss');
+  }
+  for (const hit of hits) {
+    assert.equal(hit.type, 'arts');
+    approx(hit.amount, e.s.atk * (1 - hit.target.s.res / 100));
+  }
+  return atk;
+}
+
+test('骨刺: hidden attacks exactly three of four ground targets, each for full arts ATK; RES still mitigates', () => {
+  const { h, e } = boneArena({ chess: { t_wall4: WALL('t_wall4', { res: 25 }) } });
+  boneState(e, true);
+  assert.equal(e.s.atk, 360);
+  const atk = boneAttack(h, e, 3);
+  assert.ok(atk.targets.includes(h.unit('t_wall4')), 'the nonzero-RES candidate is hit');
+  const next = boneAttack(h, e, 3);
+  approx(next.t - atk.t, e.s.interval, TICK / e.s.interval);
 });
+
+test('骨刺: actual block and independent reveal each switch 3 → 1 → 3 targets', () => {
+  for (const cause of ['block', 'reveal']) {
+    const { h, e, wall } = boneArena();
+    boneState(e, true); boneAttack(h, e, 3);
+    if (cause === 'block') boneBlock(h, e, wall);
+    else h.b.addBuff(e, { key: 'test:reveal', persist: true, flags: { reveal: true } });
+    boneState(e, false); boneAttack(h, e, 1);
+    if (cause === 'block') boneRelease(h, e, wall);
+    else h.b.removeBuff(e, 'test:reveal');
+    boneState(e, true); boneAttack(h, e, 3);
+  }
+});
+
+test('骨刺: either block or reveal keeps one target until both causes end', () => {
+  for (const first of ['block', 'reveal']) {
+    const { h, e, wall } = boneArena();
+    boneBlock(h, e, wall);
+    h.b.addBuff(e, { key: 'test:reveal', duration: first === 'reveal' ? 0.1 : 6, flags: { reveal: true } });
+    if (first === 'block') boneRelease(h, e, wall);
+    else h.run(0.2);
+    assert.equal(!!e.blockedBy, first === 'reveal');
+    boneState(e, false); boneAttack(h, e, 1);
+    if (first === 'reveal') boneRelease(h, e, wall);
+    else h.run(6);
+    boneState(e, true); boneAttack(h, e, 3);
+  }
+});
+
+test('骨刺: a higher-taunt ground target wins over the actual blocker', () => {
+  const { h, e, wall } = boneArena();
+  boneBlock(h, e, wall);
+  const target = h.unit('t_wall4');
+  h.b.addBuff(target, { key: 'test:taunt', mods: { taunt: 5 } });
+  assert.deepEqual(boneAttack(h, e, 1).targets, [target]);
+});
+
+for (const flag of ['stealth', 'camou']) {
+  test(`骨刺: blockFree does not bypass the blocker's ${flag}, including when it is the only candidate`, () => {
+    const { h, e, wall } = boneArena({ units: [{ chessId: 't_wall', row: 9, col: 6 }, { chessId: 't_wall2', row: 10, col: 6 }] });
+    boneBlock(h, e, wall);
+    h.b.addBuff(wall, { key: 'test:hidden', persist: true, flags: { [flag]: true } });
+    assert.deepEqual(boneAttack(h, e, 1).targets, [h.unit('t_wall2')]);
+    h.b.addBuff(h.unit('t_wall2'), { key: 'test:hidden', persist: true, flags: { [flag]: true } });
+    const n = e.stats.attacks;
+    h.run(5);
+    assert.equal(e.stats.attacks, n, 'no attack on an unselectable blocker');
+  });
+}
+
+for (const revealed of [false, true]) {
+  test(`骨刺: ${revealed ? 'revealed' : 'hidden'} attacks exclude real flying 炎佑 despite its highest taunt; air alone gives no attack`, () => {
+    // The real flying token's kit is resolved only in full-content mode; the injected walls still never attack.
+    const { h, e } = boneArena({ content: 'full', extraContent: [] });
+    const [air] = spawnYanyou(h.b, 'p1', { count: 1, hp: 50000 });
+    assert.ok(air?.isFlying);
+    air.x = 6.5; air.y = 9;
+    h.b.applyStatus(air, 'stun', { duration: 30, force: true });
+    h.b.addBuff(air, { key: 'test:air-taunt', mods: { taunt: 5 } });
+    if (revealed) h.b.addBuff(e, { key: 'test:reveal', persist: true, flags: { reveal: true } });
+    const atk = boneAttack(h, e, revealed ? 1 : 3);
+    assert.ok(!atk.targets.includes(air));
+    assert.ok(!h.hooksOf('damaged').some((c) => c.source === e && c.target === air));
+    for (const u of h.allies().filter((u) => u !== air)) h.b.addBuff(u, { key: 'test:hidden', persist: true, flags: { stealth: true } });
+    const n = e.stats.attacks;
+    h.run(5);
+    assert.equal(e.stats.attacks, n);
+  });
+}
+
+test('骨刺: hidden and revealed selectors share the 2 + 0.25 collider reach', () => {
+  const { h, e } = boneArena();
+  const edge = h.unit('t_wall3'), outside = h.unit('t_wall4');
+  edge.x = e.x + 2.1; edge.y = e.y;
+  outside.x = e.x + 2.26; outside.y = e.y;
+  h.b.addBuff(edge, { key: 'test:taunt', mods: { taunt: 5 } });
+  const atk = boneAttack(h, e, 3);
+  assert.ok(atk.targets.includes(edge));
+  assert.ok(!atk.targets.includes(outside));
+  h.b.addBuff(e, { key: 'test:reveal', persist: true, flags: { reveal: true } });
+  assert.deepEqual(boneAttack(h, e, 1).targets, [edge]);
+});
+
+for (const change of ['reveal', 'reveal expires', 'block', 'release block']) {
+  test(`骨刺: ${change} during wind-up selects at the strike without resetting cooldown or interval`, () => {
+    const { h, e, wall } = boneArena();
+    if (change === 'release block') boneBlock(h, e, wall);
+    if (change === 'reveal expires') h.b.addBuff(e, { key: 'test:reveal', duration: 30, flags: { reveal: true } });
+    assert.ok(h.runUntil(() => e.swing, 8));
+    const cd = e.atkCd, expectedAt = h.b.time + cd;
+    if (change === 'reveal expires') {
+      boneState(e, false);
+      assert.ok(cd > 0.15, 'reveal expires before the pending strike');
+      h.b.addBuff(e, { key: 'test:reveal', duration: 0.15, refresh: 'replace', flags: { reveal: true } });
+    }
+    if (change === 'reveal') h.b.addBuff(e, { key: 'test:reveal', duration: 30, flags: { reveal: true } });
+    if (change === 'block') boneBlock(h, e, wall);
+    if (change === 'release block') boneRelease(h, e, wall);
+    const count = ['reveal', 'block'].includes(change) ? 1 : 3;
+    const atk = boneAttack(h, e, count);
+    boneState(e, count === 3);
+    assert.ok(Math.abs(atk.t - expectedAt) <= TICK + 1e-6, 'original wind-up deadline');
+    const next = boneAttack(h, e, count);
+    assert.ok(Math.abs(next.t - atk.t - e.s.interval) <= TICK + 1e-6, 'original attack interval');
+  });
+}
+
+for (const fromHidden of [true, false]) {
+  test(`骨刺: ${fromHidden ? 'reveal' : 'hide'} after firing keeps the original projectiles and target set`, () => {
+    const { h, e } = boneArena();
+    if (!fromHidden) h.b.addBuff(e, { key: 'test:reveal', persist: true, flags: { reveal: true } });
+    const first = boneAttack(h, e, fromHidden ? 3 : 1, () => {
+      assert.ok(h.b.projectiles.list.length > 0, 'shots are in flight');
+      const cd = e.atkCd;
+      if (fromHidden) h.b.addBuff(e, { key: 'test:reveal', persist: true, flags: { reveal: true } });
+      else h.b.removeBuff(e, 'test:reveal');
+      assert.equal(e.atkCd, cd, 'the form input does not reset cooldown');
+    });
+    const next = boneAttack(h, e, fromHidden ? 1 : 3);
+    assert.ok(Math.abs(next.t - first.t - e.s.interval) <= TICK + 1e-6);
+  });
+}
 
 test(`${nm('enemy_1175_dushdo_2')}: stealth; next to 深池伙友卫队精英 its attack interval drops by traitAbility.base_attack_time`, () => {
   const h = arena();

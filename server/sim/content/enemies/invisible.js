@@ -2,13 +2,14 @@
 // content/enemies.js).
 
 import { canTargetAlly, enemyStealthed } from '../../targeting.js';
+import { ALLY_COLLIDER_RADIUS } from '../../constants.js';
 import { T, elem, hurt, targetsNear, byPriority, auraBuff } from './helpers.js';
 import { stealth, onHitStatus, skill, kitStealth } from './archetypes.js';
 
 // ---------------------------------------------------------------------------------------------------------------
 // constants (numbers that exist nowhere in the data)
 
-/** "数个目标" of 假想敌：骨刺 while stealthed [ASSUMED]. */
+/** PRTS 假想敌：骨刺 — up to 3 simultaneous targets while stealthed. */
 const ACBUNN_TARGETS = 3;
 
 /** 重弩突袭者 直击 reach along a row/column [ASSUMED]; the skill's length and its charge before the bolt (PRTS 直击 "蓄力1.4s后
@@ -114,11 +115,19 @@ function kitShadowBlade(ab) {
 }
 
 function kitBoneSpike() {
+  // PRTS 假想敌：骨刺: normal targeting ignores blocking and excludes flying units. At the engine's strike frame,
+  // effective stealth selects up to 3 targets; revealed attacks keep the ordinary single target. The default attackAnim
+  // wind-up / recovery and already-fired projectiles keep the engine's timing; forms only change the rendered clip.
   return [stealth(), {
+    spawn(b, e) {
+      e.profile.blockFree = true;
+      e.profile.canTarget = (u) => !u.isFlying;
+    },
     before(c, b, e) {
-      if (!enemyStealthed(e)) return;                             // 隐匿状态下同时攻击数个目标 (back 0 s after a block)
-      const l = byPriority(e, targetsNear(b, e, e.base.rangeRadius));
-      if (l.length) c.targets = l.slice(0, ACBUNN_TARGETS);
+      if (!enemyStealthed(e)) return;
+      const reach = e.base.rangeRadius + ALLY_COLLIDER_RADIUS;
+      const targets = targetsNear(b, e, reach).filter(e.profile.canTarget);
+      c.targets = byPriority(e, targets).slice(0, ACBUNN_TARGETS);
     },
   }];
 }
